@@ -1,0 +1,42 @@
+name: build-and-deploy-gh-pages
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build RAGnet graph JSON
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          # Install minimal deps; or use your requirements.txt if you prefer
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+          # Generate the JSON
+          python scripts/export_ragnet_json.py
+
+      - name: Stage static site
+        run: |
+          rm -rf public
+          mkdir -p public/data/out
+          cp index.html public/index.html
+          cp data/out/ragnet.json public/data/out/ragnet.json
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          publish_branch: gh-pages
+          force_orphan: true
