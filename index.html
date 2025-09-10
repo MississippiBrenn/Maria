@@ -1,8 +1,204 @@
 <!doctype html>
-<html>
-  <meta charset="utf-8">
-  <title>Maria</title>
-  <body>
-    Coming soon.
-  </body>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RAGnet – NamUs Candidate Graph</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; }
+    html, body { height:100%; margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+    .app { display:grid; grid-template-columns: 320px 1fr; height:100%; }
+    .panel { background:var(--panel); padding:16px; border-right:1px solid #1f2937; overflow:auto; }
+    h1 { font-size:18px; margin:0 0 8px; }
+    .muted { color:var(--muted); font-size:12px; }
+    .row { margin:12px 0; }
+    label { display:block; font-size:12px; margin-bottom:6px; color:var(--muted); }
+    input, select, button { width:100%; padding:8px; border-radius:10px; border:1px solid #374151; background:#0b1220; color:var(--text); }
+    button { cursor:pointer; }
+    #stats { font-size:12px; margin-top:8px; color:var(--muted); }
+    #cy { width:100%; height:100%; }
+    .legend { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); margin-top:10px; }
+    .dot { width:12px; height:12px; border-radius:999px; display:inline-block; }
+    .mp { background:#60a5fa; }
+    .up { background:#34d399; }
+    .edge-good { background:#f59e0b; }
+    .footer { font-size:11px; color:var(--muted); margin-top:12px; }
+  </style>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/layout-base/dist/layout-base.js"></script>
+  <script src="https://unpkg.com/cose-base/dist/cose-base.js"></script>
+  <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <h1>RAGnet Graph</h1>
+      <div class="muted">Missing ↔ Unidentified candidate edges</div>
+
+      <div class="row">
+        <label for="state">Filter by state</label>
+        <select id="state"></select>
+      </div>
+
+      <div class="row">
+        <label for="sex">Filter by sex</label>
+        <select id="sex">
+          <option value="">Any</option>
+          <option value="F">Female</option>
+          <option value="M">Male</option>
+          <option value="U">Unknown</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="search">Find node (NamUs number)</label>
+        <input id="search" placeholder="e.g., MP12345 or UP67890" />
+      </div>
+
+      <div class="row">
+        <button id="apply">Apply filters</button>
+      </div>
+
+      <div class="legend">
+        <span class="dot mp"></span> MP nodes
+        <span class="dot up"></span> UP nodes
+      </div>
+      <div class="legend">
+        <span class="dot edge-good"></span> Edges (candidates)
+      </div>
+
+      <div id="stats"></div>
+
+      <div class="footer">
+        Tips: Shift+drag to pan, scroll to zoom. Click a node to highlight its candidates.
+      </div>
+    </aside>
+
+    <main id="cy"></main>
+  </div>
+
+  <script>
+    const CY_STYLE = [
+      { selector: 'node[type="MP"]', style: {
+          'background-color': '#60a5fa',
+          'label': 'data(label)',
+          'font-size': 10,
+          'text-wrap': 'wrap',
+          'text-max-width': 120,
+          'color': '#e5e7eb',
+          'width': 16, 'height': 16
+      }},
+      { selector: 'node[type="UP"]', style: {
+          'background-color': '#34d399',
+          'label': 'data(label)',
+          'font-size': 10,
+          'text-wrap': 'wrap',
+          'text-max-width': 120,
+          'color': '#e5e7eb',
+          'width': 16, 'height': 16
+      }},
+      { selector: 'edge', style: {
+          'line-color': '#f59e0b',
+          'width': 1.5,
+          'opacity': 0.7,
+          'curve-style': 'haystack'  // fast for big graphs
+      }},
+      { selector: '.hidden', style: { 'display': 'none' }},
+      { selector: '.faded',  style: { 'opacity': 0.08 } },
+      { selector: '.highlight', style: { 'opacity': 1 } }
+    ];
+
+    let fullData = null;
+    let cy = null;
+
+    async function loadGraph() {
+      const resp = await fetch('data/out/ragnet.json', { cache: 'no-cache' });
+      fullData = await resp.json();
+
+      // Prepare elements for Cytoscape
+      const elements = [];
+      fullData.nodes.forEach(n => elements.push({ data: n }));
+      fullData.edges.forEach(e => elements.push({ data: e }));
+
+      cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements,
+        style: CY_STYLE,
+        layout: { name: 'cose-bilkent', animate: false, nodeRepulsion: 4500, idealEdgeLength: 120 }
+      });
+
+      // Populate state dropdown
+      const states = Array.from(new Set(fullData.nodes.map(n => (n.state || '').toUpperCase()).filter(Boolean))).sort();
+      const stateSel = document.getElementById('state');
+      stateSel.innerHTML = `<option value="">Any</option>` + states.map(s=>`<option>${s}</option>`).join('');
+
+      updateStats();
+
+      // Node click highlight
+      cy.on('tap', 'node', evt => {
+        const n = evt.target;
+        cy.elements().removeClass('faded highlight');
+        const neighborhood = n.closedNeighborhood();
+        cy.elements().not(neighborhood).addClass('faded');
+        neighborhood.addClass('highlight');
+      });
+      // Background click clears highlight
+      cy.on('tap', evt => {
+        if (evt.target === cy) cy.elements().removeClass('faded highlight');
+      });
+    }
+
+    function applyFilters() {
+      const state = (document.getElementById('state').value || '').toUpperCase();
+      const sex = (document.getElementById('sex').value || '').toUpperCase();
+
+      cy.batch(() => {
+        cy.elements().removeClass('hidden');
+
+        // hide by state/sex on nodes
+        cy.nodes().forEach(n => {
+          const hideState = state && ((n.data('state')||'').toUpperCase() !== state);
+          const hideSex = sex && ((n.data('sex')||'').toUpperCase() !== sex);
+          if (hideState || hideSex) n.addClass('hidden');
+        });
+
+        // hide edges if either end hidden
+        cy.edges().forEach(e => {
+          const s = e.source(), t = e.target();
+          if (s.hasClass('hidden') || t.hasClass('hidden')) e.addClass('hidden');
+        });
+      });
+
+      updateStats();
+    }
+
+    function searchNode() {
+      const q = document.getElementById('search').value.trim().toUpperCase();
+      if (!q) return;
+      const target = cy.getElementById(q);
+      if (target && target.length) {
+        cy.elements().removeClass('faded highlight');
+        const neighborhood = target.closedNeighborhood();
+        cy.elements().not(neighborhood).addClass('faded');
+        neighborhood.addClass('highlight');
+        cy.center(target);
+        cy.animate({ fit: { eles: neighborhood, padding: 60 }, duration: 300 });
+      }
+    }
+
+    function updateStats() {
+      const visibleNodes = cy.nodes(':visible').length;
+      const visibleEdges = cy.edges(':visible').length;
+      document.getElementById('stats').textContent = `Visible: ${visibleNodes} nodes, ${visibleEdges} edges`;
+    }
+
+    document.getElementById('apply').addEventListener('click', () => {
+      applyFilters();
+      const q = document.getElementById('search').value.trim();
+      if (q) searchNode();
+    });
+
+    loadGraph();
+  </script>
+</body>
 </html>
