@@ -17,3 +17,17 @@ python3 data-build/build_graph_artifacts.py
 # 6. Score candidate matches and write out/candidates.jsonl
 python3 data-build/build_candidates.py
 
+
+new instructions -for static url page
+merge main onto githubpages branch
+
+
+scripts: merge_namus.py
+scripts: export_ragnet_json.py
+
+
+
+for neptune 
+in data/clean 
+run prep_neptune 
+upload mp_master and up_master files 

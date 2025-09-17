@@ -29,9 +29,10 @@ jobs:
       - name: Stage static site
         run: |
           rm -rf public
-          mkdir -p public/data/out
+          mkdir -p public
           cp index.html public/index.html
-          cp data/out/ragnet.json public/data/out/ragnet.json
+          cp ragnet.json public/ragnet.json
+
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
