@@ -18,8 +18,8 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return 2 * R * asin(sqrt(a))
 
 # Load the normalized CSVs (from namus_mapper.py)
-mp = pd.read_csv(os.path.join(DATA_DIR, 'sample_mp.csv'))
-uid = pd.read_csv(os.path.join(DATA_DIR, 'sample_uid.csv'))
+mp = pd.read_csv(os.path.join(DATA_DIR, 'clean', 'MP_master.csv'))
+uid = pd.read_csv(os.path.join(DATA_DIR, 'clean', 'UP_master.csv'))
 
 # Normalize dates → ordinal days
 mp['mp_date_days'] = pd.to_datetime(mp['last_seen_date']).dt.date.map(lambda d: d.toordinal())
