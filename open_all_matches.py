@@ -7,9 +7,27 @@ import pandas as pd
 import webbrowser
 import time
 import sys
+import os
 
-# Load tracker
-tracker = pd.read_csv('out/match_investigation_tracker.csv')
+# Load from all_matches_scored.csv (updated with infant filter)
+if os.path.exists('out/all_matches_scored.csv'):
+    tracker = pd.read_csv('out/all_matches_scored.csv')
+    # Add ID column
+    tracker['ID'] = range(1, len(tracker) + 1)
+    # Rename columns to match old format
+    tracker = tracker.rename(columns={
+        'final_score': 'Score',
+        'mp_match_count': 'MP_Cnt',
+        'up_match_count': 'UP_Cnt',
+        'mp_id': 'MP',
+        'up_id': 'UP',
+        'mp_name': 'Name'
+    })
+elif os.path.exists('out/match_investigation_tracker.csv'):
+    tracker = pd.read_csv('out/match_investigation_tracker.csv')
+else:
+    print("Error: No match files found!")
+    sys.exit(1)
 
 def extract_case_number(case_id):
     """Extract numeric case number from ID like MP89129 or UP11054"""

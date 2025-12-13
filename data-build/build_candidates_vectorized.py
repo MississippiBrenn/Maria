@@ -55,6 +55,12 @@ pairs = pairs.merge(
 
 print(f"   Merged data ready: {len(pairs):,} rows")
 
+# FILTER: Exclude UPs with no age (likely infant remains)
+print("\n2b. Filtering out likely infant remains...")
+before_infant_filter = len(pairs)
+pairs = pairs[pairs['age_min_up'].notna() & pairs['age_max_up'].notna()]
+print(f"   Before: {before_infant_filter:,} | After: {len(pairs):,} | Removed: {before_infant_filter - len(pairs):,} (no UP age = likely infant)")
+
 # VECTORIZED SCORING
 print("\n3. Computing scores (vectorized)...")
 

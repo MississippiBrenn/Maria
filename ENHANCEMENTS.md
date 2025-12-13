@@ -4,10 +4,13 @@
 
 **Key Insight:** Focus human time on truly unique matches where both the missing person and unidentified person have very few candidates.
 
-**Hard Filter:** Only matches where BOTH sides have ≤10 total candidates are kept.
-- **Before filter:** 5.68M potential matches
-- **After filter:** 165 actionable matches
-- **High priority:** 13 matches where both sides have ≤5 candidates
+**Hard Filters Applied:**
+
+1. **Infant remains exclusion**: Unidentified persons with no estimated age are excluded (likely infant/fetal remains)
+2. **Uniqueness filter**: Only matches where BOTH sides have ≤10 total candidates are kept
+   - **Before filter:** 5.68M potential matches
+   - **After filter:** 165 actionable matches
+   - **High priority:** 13 matches where both sides have ≤5 candidates
 
 This ensures every match you investigate is worth your time.
 
