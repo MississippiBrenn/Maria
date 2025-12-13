@@ -1,2 +1,0 @@
-{"mp_id": "MP-002", "candidates": [{"mp_id": "MP-002", "uid_id": "UID-102", "score": 0.4436, "km": 7.2, "why": ["AgeSim (+1.20)", "SexMatch (+1.00)", "HeightSim (+0.80)", "EyeColorSim (+0.50)", "DateConsistency (+0.44)"]}]}
-{"mp_id": "MP-001", "candidates": [{"mp_id": "MP-001", "uid_id": "UID-101", "score": 0.4047, "km": 233.9, "why": ["AgeSim (+1.20)", "SexMatch (+1.00)", "HeightSim (+0.57)", "EyeColorSim (+0.50)", "DateConsistency (+0.43)"]}]}

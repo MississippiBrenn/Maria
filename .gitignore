@@ -12,8 +12,13 @@ ENV/
 # Environment variables
 .env
 
-# Large data files (should be in S3, not git)
-out/neptune_load/*.csv
+# Large data files (keep out of git)
+out/*.csv
+out/*.jsonl
+out/*.json
+data/raw/**/*.csv
+data/compiled/**/*.csv
+data/clean/**/*.csv
 
 # OS files
 .DS_Store
