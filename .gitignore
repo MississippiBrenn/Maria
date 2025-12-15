@@ -16,10 +16,11 @@ ENV/
 out/*.csv
 out/*.jsonl
 out/*.json
-data/raw/**/*.csv
 data/compiled/**/*.csv
-data/clean/**/*.csv
+# Allow raw data files
+!data/raw/**/*.csv
 # Allow the master files used by matching algorithm
+data/clean/**/*.csv
 !data/clean/MP_master.csv
 !data/clean/UP_master.csv
 
