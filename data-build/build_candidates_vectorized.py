@@ -290,7 +290,81 @@ with open(jsonl_output, 'w', encoding='utf-8') as f:
 
 print(f"✓ {jsonl_output}")
 
+# Auto-generate investigation tracker and markdown
+print("\nGenerating investigation files...")
+from datetime import datetime
+
+# 1. Simple CSV tracker (with timestamp to avoid overwriting)
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+tracker = pairs.head(20).copy()
+tracker['ID'] = range(1, len(tracker) + 1)
+tracker_output = os.path.join(OUT_DIR, f'match_investigation_tracker_{timestamp}.csv')
+tracker[['ID', 'final_score', 'mp_match_count', 'up_match_count', 'mp_id', 'up_id', 'mp_name',
+         'city_mp', 'state_mp', 'city_up', 'state_up', 'days_gap']].rename(columns={
+    'final_score': 'Score',
+    'mp_match_count': 'MP_Cnt',
+    'up_match_count': 'UP_Cnt',
+    'mp_id': 'MP',
+    'up_id': 'UP',
+    'mp_name': 'Name',
+    'city_mp': 'Location_MP',
+    'city_up': 'Location_UP',
+    'days_gap': 'Days'
+}).assign(Investigation_Notes='').to_csv(tracker_output, index=False)
+print(f"✓ {tracker_output}")
+
+# 2. Markdown file
+top_100 = pairs.head(100)
+md = f'''# Top Matches for Investigation
+
+Last updated: {datetime.now().strftime('%Y-%m-%d')}
+
+**Total matches:** {len(pairs)}
+**Filtered out:** 1.7M infant remains (no UP age estimate)
+
+## Priority Guide
+- 🔥 **Ultra-priority**: Both ≤2 matches
+- ⭐ **High priority**: Both ≤5 matches
+- ✓ **Good match**: Both ≤10 matches
+
+## Status Guide
+- ⬜ **To Review** | 🔍 **Investigating** | ✅ **Match** | ❌ **Excluded** | ⏸️ **On Hold**
+
+---
+
+## Matches
+
+| # | Status | Score | MP | UP | Matches | Name | Location | Days | Notes |
+|---|--------|-------|----|----|---------|------|----------|------|-------|
+'''
+
+for idx, row in top_100.iterrows():
+    match_id = idx + 1
+    priority = '🔥' if (row['mp_match_count'] <= 2 and row['up_match_count'] <= 2) else ('⭐' if (row['mp_match_count'] <= 5 and row['up_match_count'] <= 5) else '✓')
+    matches = f"{priority} {int(row['mp_match_count'])}↔{int(row['up_match_count'])}"
+    mp_num = row['mp_id'].replace('MP', '')
+    up_num = row['up_id'].replace('UP', '')
+    days = int(row['days_gap']) if pd.notna(row['days_gap']) else '?'
+    md += f"| {match_id} | ⬜ | {row['final_score']:.3f} | [{row['mp_id']}](https://www.namus.gov/MissingPersons/Case#/{mp_num}) | [{row['up_id']}](https://www.namus.gov/UnidentifiedPersons/Case#/{up_num}/details?nav) | {matches} | {row['mp_name']} | {row['state_mp']}→{row['state_up']} | {days} |  |\\n"
+
+md += f'''
+
+---
+
+## Quick Stats
+- 🔥 Ultra (≤2 both): {len(top_100[(top_100['mp_match_count'] <= 2) & (top_100['up_match_count'] <= 2)])}
+- ⭐ High (≤5 both): {len(top_100[(top_100['mp_match_count'] <= 5) & (top_100['up_match_count'] <= 5)])}
+- ✓ Total: {len(pairs)}
+
+**Filters:** Infant remains excluded | Both sides ≤10 matches | Same state | Age overlap | Temporal validity
+'''
+
+md_output = os.path.join(ROOT, 'TOP_MATCHES.md')
+with open(md_output, 'w') as f:
+    f.write(md)
+print(f"✓ {md_output}")
+
 print(f"\n" + "="*60)
 print("✓ COMPLETE!")
-print(f"Review high_priority_matches.csv for best leads!")
+print(f"Review TOP_MATCHES.md or high_priority_matches.csv for best leads!")
 print("="*60)

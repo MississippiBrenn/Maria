@@ -19,6 +19,9 @@ out/*.json
 data/raw/**/*.csv
 data/compiled/**/*.csv
 data/clean/**/*.csv
+# Allow the master files used by matching algorithm
+!data/clean/MP_master.csv
+!data/clean/UP_master.csv
 
 # OS files
 .DS_Store
