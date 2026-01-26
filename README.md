@@ -1,119 +1,252 @@
-# Maria - Missing Persons Matching System
+# Maria
 
-A simple matching system to find potential connections between missing persons and unidentified remains.
+**A probabilistic matching system for identifying connections between missing persons and unidentified remains**
+
+Maria processes NamUs (National Missing and Unidentified Persons System) data to surface high-confidence match candidates for human investigation. The system applies hard filters to eliminate impossible matches, then scores remaining candidates using weighted demographic and temporal features, enhanced by a novel **uniqueness-based prioritization** algorithm.
+
+## Problem Domain
+
+The United States has approximately:
+- **90,000+** active missing persons cases
+- **14,000+** unidentified human remains cases
+
+Traditional approaches generate millions of potential matches (90K × 14K = 1.26B pairs), making human review impossible. Maria solves this through intelligent filtering and prioritization.
+
+## Key Innovation: Uniqueness Scoring
+
+**Core insight:** If a missing person only matches 2-3 unidentified remains (and vice versa), those matches are *far more likely* to be correct than matches where each side has hundreds of candidates.
+
+```
+final_score = base_score + uniqueness_boost + rarity_boost + era_boost
+```
+
+| Match Count (both sides) | Uniqueness Boost |
+|--------------------------|------------------|
+| 1-2 matches              | +0.50            |
+| 3-5 matches              | +0.30            |
+| 6-10 matches             | +0.16            |
+| 11-15 matches            | +0.06            |
+| >15 matches              | Filtered out     |
+
+This reduces actionable matches from **5.68 million** to approximately **165** high-priority cases.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         DATA INGESTION                              │
+│  NamUs CSV Exports → process_namus_downloads.py → Master CSVs       │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CANDIDATE PAIR GENERATION                        │
+│  generate_candidate_pairs.py                                        │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ Hard Filters (eliminate impossible matches):                 │   │
+│  │  • Sex must match (M↔M, F↔F, Unknown↔any)                   │   │
+│  │  • Age ranges must overlap                                   │   │
+│  │  • Found date ≥ last seen date (−7 day tolerance)           │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│  Optimization: Vectorized pandas operations, sex-based chunking     │
+│  Output: candidate_pairs.csv (~3.5GB for full dataset)              │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         SCORING ENGINE                              │
+│  score_candidates.py                                                │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ Weighted Component Scoring:                                  │   │
+│  │  • Sex match      (weight: 2.0)  Perfect=1.0, Unknown=0.5   │   │
+│  │  • Age similarity (weight: 1.5)  Projected age overlap      │   │
+│  │  • Geography      (weight: 2.0)  City→County→State cascade  │   │
+│  │  • Race match     (weight: 0.8)  Soft match (allows error)  │   │
+│  │  • Temporal       (weight: 1.2)  Decay function over time   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │ Enhancement Boosts:                                          │   │
+│  │  • Uniqueness boost (0.0–0.50): Few matches = high priority │   │
+│  │  • Rarity boost (0.0–0.20): Rare demographics matching      │   │
+│  │  • Era boost (+0.10): 1980–2006 prioritization              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│  Output: all_matches_scored.csv, high_priority_matches.csv          │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      INVESTIGATION OUTPUT                           │
+│  • TOP_MATCHES.md - Human-readable investigation guide              │
+│  • candidates.jsonl - Top 20 matches per MP (JSON Lines)            │
+│  • Investigation tracker CSV (for case management)                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ## Project Structure
 
 ```
 Maria/
+├── data-build/                    # Core pipeline
+│   ├── process_namus_downloads.py # Data ingestion & normalization
+│   ├── generate_candidate_pairs.py# Vectorized pair generation
+│   ├── score_candidates.py        # Scoring engine with boosts
+│   ├── scoring.py                 # Component scoring functions
+│   ├── rarity_scoring.py          # Demographic rarity calculation
+│   ├── county_adjacency.py        # Geographic proximity heuristics
+│   ├── state_normalizer.py        # State name standardization
+│   └── merge_raw_downloads.py     # Utility for combining exports
+│
 ├── data/
-│   ├── raw/                    # NamUs CSV downloads go here
-│   └── clean/
-│       ├── MP_master.csv       # Processed missing persons data
-│       └── UP_master.csv       # Processed unidentified persons data
-├── data-build/
-│   ├── build_graph_artifacts.py  # Generates cases JSON files
-│   ├── build_candidates.py       # Scores matches between MP and UP
-│   ├── scoring.py                # Core matching algorithm
-│   └── requirements.txt
-└── out/
-    ├── cases_mp.json          # Missing persons cases
-    ├── cases_uid.json         # Unidentified persons cases
-    └── candidates.jsonl       # Scored matches (top 20 per MP)
+│   ├── raw/                       # NamUs CSV downloads
+│   └── clean/                     # Processed master files
+│       ├── MP_master.csv          # Missing persons
+│       └── UP_master.csv          # Unidentified persons
+│
+├── out/                           # Generated outputs
+│   ├── candidate_pairs.csv        # Filtered candidate pairs
+│   ├── all_matches_scored.csv     # All scored matches
+│   ├── high_priority_matches.csv  # Top matches for investigation
+│   └── candidates.jsonl           # Top 20 per MP
+│
+├── TOP_MATCHES.md                 # Auto-generated investigation guide
+└── ENHANCEMENTS.md                # Algorithm documentation
 ```
+
+## Algorithm Details
+
+### Scoring Components
+
+**1. Sex Match (weight: 2.0)**
+- Exact match: 1.0
+- Unknown match: 0.5
+- Mismatch: Hard reject
+
+**2. Age Similarity (weight: 1.5)**
+- Projects MP's age forward based on time elapsed
+- Calculates overlap between projected age range and UP's estimated age
+- Exponential decay for near-misses
+
+**3. Geographic Proximity (weight: 2.0)**
+- Same city + county: 1.0
+- Same county: 0.85
+- Same state: 0.3
+- Different state: Hard filtered in pair generation
+
+**4. Race Match (weight: 0.8)**
+- Match: 1.0
+- Mismatch: 0.3 (soft—allows for identification errors)
+
+**5. Temporal Score (weight: 1.2)**
+- Within 30 days: 1.0
+- Within 6 months: 0.8
+- Within 1 year: 0.6
+- >5 years: Exponential decay
+
+### Enhancement Modules
+
+**Rarity Scoring** (`rarity_scoring.py`)
+- Calculates demographic uniqueness for each case
+- Factors: state frequency, sex distribution, race distribution, age extremes
+- Rare MP matching rare UP = +0.20 boost
+
+**Era Prioritization**
+- Cases from 1980–2006 receive +0.10 boost
+- Rationale: Better data quality, active investigation period
+
+## Performance
+
+The pipeline uses **vectorized pandas/numpy operations** for efficiency:
+
+| Stage | Naive Approach | Maria |
+|-------|----------------|-------|
+| Pair generation | O(n × m) loops | Vectorized merge + filter |
+| Scoring | Row iteration | Vectorized column operations |
+| Full pipeline | ~hours | ~minutes |
+
+Memory management through sex-based chunking allows processing on standard hardware.
 
 ## Setup
 
-1. Create a virtual environment:
 ```bash
+# Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-```
 
-2. Install dependencies:
-```bash
+# Install dependencies
 pip install -r data-build/requirements.txt
 ```
 
-## Workflow
+### Dependencies
+- pandas
+- numpy
+- tqdm
+
+## Usage
 
 ### 1. Download NamUs Data
-- Log into NamUs and export bulk downloads for:
-  - Missing Persons (all columns available)
-  - Unidentified Persons (all columns available)
-- Save CSV files to `data/raw/`
+Export bulk downloads from [NamUs](https://namus.gov):
+- Missing Persons (all available columns)
+- Unidentified Persons (all available columns)
 
-### 2. Process into Master Files
+Save to `data/raw/`
+
+### 2. Process Raw Data
 ```bash
 python3 data-build/process_namus_downloads.py \
-    --mp data/raw/missing_persons_download.csv \
-    --up data/raw/unidentified_persons_download.csv
+    --mp data/raw/missing_persons.csv \
+    --up data/raw/unidentified_persons.csv
 ```
-This creates `data/clean/MP_master.csv` and `data/clean/UP_master.csv`
 
 ### 3. Generate Candidate Pairs
 ```bash
-python3 data-build/build_graph_artifacts_simple.py
+python3 data-build/generate_candidate_pairs.py
 ```
-This applies hard filters and generates:
-- `out/candidate_pairs.csv` - Filtered pairs for scoring
-- `out/cases_mp.json` - Missing persons case data
-- `out/cases_up.json` - Unidentified persons case data
 
-### 4. Score Matches with Uniqueness Boost
+### 4. Score Matches
 ```bash
-python3 data-build/build_candidates_simple.py
+python3 data-build/score_candidates.py
 ```
-This scores all matches and outputs:
-- `out/all_matches_scored.csv` - All valid matches with scores
-- `out/candidates.jsonl` - Top 20 matches per MP
-- `out/high_priority_matches.csv` - **Matches with high uniqueness scores**
 
-## Matching Algorithm
+### 5. Review Results
+- Open `TOP_MATCHES.md` for the investigation guide
+- `high_priority_matches.csv` contains the best leads
+- Each match includes links to NamUs case pages
 
-The simplified algorithm ([scoring_simple.py](data-build/scoring_simple.py)) works with limited NamUs fields:
+## Output Interpretation
 
-### Hard Filters (must pass):
-1. **Sex must match** (M/F/Unknown)
-   - M must match M
-   - F must match F
-   - Unknown can match either (with score penalty)
-2. **Same state** (geographic constraint)
-3. **Age ranges overlap** (allows for estimation errors)
-4. **Found date >= Last seen date** (±7 day tolerance)
+### Priority Levels
+- **Ultra-priority**: Both MP and UP have ≤2 matches
+- **High priority**: Both sides ≤5 matches, score ≥0.70
+- **Standard**: Both sides ≤15 matches
 
-### Weighted Scoring Components:
-- **Sex match** (weight: 2.0)
-  - Exact match: 1.0
-  - Unknown match: 0.5
-- **Age similarity** (weight: 1.5)
-  - Based on age range overlap
-- **Geographic proximity** (weight: 2.0)
-  - Same city + county: 1.0
-  - Same county: 0.8
-  - Same state: 0.3
-- **Race match** (weight: 0.8)
-  - Match: 1.0
-  - Differ: 0.3 (soft - allows misidentification)
-- **Temporal proximity** (weight: 1.2)
-  - Within 30 days: 1.0
-  - Within 6 months: 0.8
-  - Within 1 year: 0.6
-  - Decays over time
+### Score Breakdown
+```
+MP-12345 <-> UP-6789
+  Final Score: 0.92
+    Base: 0.62 (demographics + geography + temporal)
+    Uniqueness: +0.20 (MP has 2 matches, UP has 3 matches)
+    Rarity: +0.10 (uncommon demographic profile)
+```
 
-### Uniqueness Boost (Key Innovation!)
-Matches get bonus scores based on how rare they are:
-- **MP has ≤3 matches**: +0.15
-- **UP has ≤3 matches**: +0.15
-- **Both are unique**: +0.30 (cumulative)
+## Future Enhancements
 
-**Rationale:** If a missing person only matches 1-3 unidentified persons (or vice versa), those are much more likely to be correct matches!
+- [ ] Geographic clustering visualization
+- [ ] Temporal pattern analysis
+- [ ] Multi-source data integration (FBI, Charley Project)
+- [ ] Name similarity matching (Levenshtein distance)
+- [ ] Real county adjacency database
 
-Final score = base_score (0-1) + uniqueness_boost, capped at 1.0
+## Technical Decisions
 
-## Next Steps
+**Why state-based filtering?**
+Cross-state matching is rare in reality and would multiply candidate pairs. The system keeps results actionable by focusing on in-state matches first.
 
-1. Download fresh NamUs data exports
-2. Run the full pipeline (steps 2-4 above)
-3. Review `high_priority_matches.csv` first - these have the best uniqueness signals
-4. For each high-priority match, investigate further using NamUs case details
+**Why soft race matching?**
+Race identification from remains can be unreliable due to decomposition, ancestry complexity, and subjective classification. A hard filter would miss valid matches.
+
+**Why the era boost?**
+Cases from 1980–2006 tend to have better documentation and are within the window where matches are most actionable for families.
+
+## License
+
+MIT

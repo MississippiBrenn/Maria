@@ -1,100 +1,227 @@
+"""
+Simplified scoring algorithm using only basic NamUs fields:
+- Sex, Age, Race
+- City/County/State (with county adjacency)
+- Dates (DLC vs DBF)
+"""
+
 import math
+from county_adjacency import calculate_geographic_score_with_adjacency
 
-def exp_decay(gap: float, scale: float) -> float:
-    return math.exp(-max(gap, 0.0)/scale)
 
-def sim_age(mp_min, mp_max, uid_min, uid_max):
-    if None in (mp_min, mp_max, uid_min, uid_max):
-        return 0.5
-    gap = max(0, max(mp_min - uid_max, uid_min - mp_max))
-    return exp_decay(gap, 5.0)
+def normalize_str(s):
+    """Normalize string for comparison."""
+    if not s or str(s).strip() == "":
+        return ""
+    return str(s).strip().upper()
 
-def sim_height(mp_h, uid_h):
-    if mp_h is None or uid_h is None:
-        return 0.5
-    return exp_decay(abs(mp_h - uid_h), 3.0)
 
-def sim_weight(mp_w, uid_w):
-    if mp_w is None or uid_w is None:
-        return 0.5
-    return exp_decay(abs(mp_w - uid_w), 20.0)
+def sex_match_score(mp_sex, up_sex):
+    """
+    Score sex match.
+    Returns: (score, is_hard_reject)
+    """
+    mp = normalize_str(mp_sex)
+    up = normalize_str(up_sex)
 
-def sim_distance_km(km):
-    if km is None:
-        return 0.5
-    return 1.0 / (1.0 + math.log1p(max(km, 0.0)))
+    # Perfect match
+    if mp == up:
+        return 1.0, False
 
-def date_consistency(last_seen_days, found_days):
-    if last_seen_days is None or found_days is None:
+    # Unknown can match either (with penalty)
+    if mp == "UNKNOWN" or up == "UNKNOWN":
         return 0.5, False
-    delta = found_days - last_seen_days
-    if delta < -7:
-        return 0.0, True
-    if delta < 0:
-        return 0.2, False
-    return 1.0 / (1.0 + (delta / 365.0)), False
 
-def cat_sim(a, b, equal_score=1.0, diff_score=0.2):
-    if not a or not b:
-        return 0.5
-    return equal_score if (str(a).strip().lower() == str(b).strip().lower()) else diff_score
+    # Mismatch
+    return 0.0, True  # Hard reject
 
-DEFAULT_WEIGHTS = dict(
-    sex=1.0, age=1.2, height=0.8, weight=0.4, distance=1.0, date=1.0,
-    eyes=0.5, race=0.3, tattoo=1.4, items=0.8, features=1.6, modality=0.6
-)
 
-FEATURE_TO_WEIGHT_KEY = {
-    "SexMatch":"sex","AgeSim":"age","HeightSim":"height","WeightSim":"weight",
-    "DistanceSim":"distance","DateConsistency":"date","EyeColorSim":"eyes",
-    "RaceSim":"race","TattooSignal":"tattoo","ClothingSignal":"items",
-    "DistinctiveMarkSignal":"features","ForensicsSignal":"modality"
+def age_similarity(mp_age_at_missing, up_min, up_max, years_between):
+    """
+    Calculate age similarity accounting for time passage.
+
+    Args:
+        mp_age_at_missing: Age when person went missing
+        up_min, up_max: Estimated age range of unidentified person when found
+        years_between: Years between last seen date and found date
+
+    Returns 0.0 to 1.0 based on overlap after projecting MP's age forward.
+    """
+    if mp_age_at_missing is None or None in (up_min, up_max):
+        return 0.5  # Neutral if data missing
+
+    # Project MP's age to when UP was found
+    if years_between is not None and years_between >= 0:
+        mp_projected_age = mp_age_at_missing + years_between
+    else:
+        # If no date info, use age at missing
+        mp_projected_age = mp_age_at_missing
+
+    # Create a range for MP (±2 years to account for estimation error)
+    mp_min = mp_projected_age - 2
+    mp_max = mp_projected_age + 2
+
+    # Calculate overlap with UP's age range
+    overlap_start = max(mp_min, up_min)
+    overlap_end = min(mp_max, up_max)
+    overlap = max(0, overlap_end - overlap_start + 1)
+
+    if overlap == 0:
+        # Check how far apart they are
+        gap = min(abs(mp_min - up_max), abs(up_min - mp_max))
+        # Exponential decay for near misses
+        return max(0, 0.5 * math.exp(-gap / 5.0))
+
+    # Normalize by average range size
+    mp_range = mp_max - mp_min + 1
+    up_range = up_max - up_min + 1
+    avg_range = (mp_range + up_range) / 2.0
+
+    return min(1.0, overlap / avg_range)
+
+
+def geographic_score(mp_state, mp_county, mp_city, up_state, up_county, up_city):
+    """
+    Score geographic proximity based on state/county/city match.
+    """
+    mp_s = normalize_str(mp_state)
+    up_s = normalize_str(up_state)
+
+    # Different state = shouldn't happen (filtered earlier)
+    if mp_s != up_s or mp_s == "":
+        return 0.0
+
+    mp_co = normalize_str(mp_county)
+    up_co = normalize_str(up_county)
+    mp_ci = normalize_str(mp_city)
+    up_ci = normalize_str(up_city)
+
+    # Same state + same county + same city
+    if mp_co == up_co and mp_co != "" and mp_ci == up_ci and mp_ci != "":
+        return 1.0
+
+    # Same state + same county
+    if mp_co == up_co and mp_co != "":
+        return 0.8
+
+    # Same state only
+    return 0.3
+
+
+def race_match_score(mp_race, up_race):
+    """Score race/ethnicity match (soft - can be misidentified)."""
+    mp = normalize_str(mp_race)
+    up = normalize_str(up_race)
+
+    if mp == "" or up == "":
+        return 0.5  # Neutral
+
+    if mp == up:
+        return 1.0
+
+    # Different race - still possible (misidentification, decomposition)
+    return 0.3
+
+
+def temporal_score(days_gap):
+    """
+    Score based on time between last seen and found.
+    Closer in time = higher score.
+    """
+    if days_gap is None or days_gap < 0:
+        return 0.5  # Neutral if unknown
+
+    # Negative shouldn't happen (filtered earlier)
+    if days_gap < 0:
+        return 0.0
+
+    # Within 30 days
+    if days_gap <= 30:
+        return 1.0
+
+    # Within 6 months
+    if days_gap <= 180:
+        return 0.8
+
+    # Within 1 year
+    if days_gap <= 365:
+        return 0.6
+
+    # Within 5 years
+    if days_gap <= 1825:
+        return 0.4
+
+    # Over 5 years - exponential decay
+    return 0.4 * math.exp(-(days_gap - 1825) / 3650)
+
+
+# Weights for each component
+DEFAULT_WEIGHTS = {
+    'sex': 2.0,        # Critical - must match
+    'age': 1.5,        # Very important
+    'geography': 2.0,  # Very important (same state/county)
+    'race': 0.8,       # Less reliable
+    'temporal': 1.2,   # Important but not critical
 }
 
-def score_pair(row, use_race=False, weights=None):
-    W = dict(DEFAULT_WEIGHTS)
+
+def score_match(mp_row, up_row, weights=None):
+    """
+    Score a potential MP <-> UP match.
+
+    Args:
+        mp_row: dict with keys: sex, age_min, age_max, state, county, city, race, last_seen_days
+        up_row: dict with keys: sex, age_min, age_max, state, county, city, race, found_days
+
+    Returns:
+        (score, components_dict) or (None, reject_reason) if hard reject
+    """
+    W = DEFAULT_WEIGHTS.copy()
     if weights:
         W.update(weights)
 
     # Hard filters
-    if row.get('mp_sex') and row.get('uid_sex') and row['mp_sex'] != row['uid_sex']:
-        return None, ["Sex mismatch (reject)"]
+    sex_score, sex_reject = sex_match_score(mp_row.get('sex'), up_row.get('sex'))
+    if sex_reject:
+        return None, "Sex mismatch"
 
-    dc, reject = date_consistency(row.get('mp_date_days'), row.get('uid_date_days'))
-    if reject:
-        return None, ["Found before last seen (reject)"]
+    # Calculate temporal gap
+    days_gap = None
+    if mp_row.get('last_seen_days') and up_row.get('found_days'):
+        days_gap = up_row['found_days'] - mp_row['last_seen_days']
+        if days_gap < -7:  # Allow 7 day tolerance
+            return None, "Found before last seen"
 
-    comps = []
-    comps.append(("SexMatch", 1.0))
-    comps.append(("AgeSim", sim_age(row.get('mp_age_min'), row.get('mp_age_max'),
-                                   row.get('uid_age_min'), row.get('uid_age_max'))))
-    comps.append(("HeightSim", sim_height(row.get('mp_height'), row.get('uid_height'))))
-    comps.append(("WeightSim", sim_weight(row.get('mp_weight'), row.get('uid_weight'))))
-    comps.append(("DistanceSim", sim_distance_km(row.get('km'))))
-    comps.append(("DateConsistency", dc))
-    comps.append(("EyeColorSim", cat_sim(row.get('mp_eye'), row.get('uid_eye'), 1.0, 0.2)))
+    # Component scores
+    geo_score, geo_reason = calculate_geographic_score_with_adjacency(
+        mp_row.get('state'), mp_row.get('county'), mp_row.get('city'),
+        up_row.get('state'), up_row.get('county'), up_row.get('city')
+    )
 
-    if use_race:
-        comps.append(("RaceSim", cat_sim(row.get('mp_race'), row.get('uid_race'), 0.8, 0.4)))
+    # Calculate years between dates for age projection
+    years_between = None
+    if days_gap is not None:
+        years_between = days_gap / 365.25
 
-    T = min(int(row.get('shared_tattoos', 0) or 0), 2) / 2.0
-    I = min(int(row.get('shared_items', 0) or 0), 2) / 2.0
-    F = 1.0 if row.get('distinctive_match') else 0.0
-    M = min(max(int(row.get('shared_modalities', 0) or 0), 0), 3) / 3.0
+    components = {
+        'sex': sex_score,
+        'age': age_similarity(
+            mp_row.get('age_min'),  # Age at time of missing
+            up_row.get('age_min'), up_row.get('age_max'),  # Age when found
+            years_between  # Years to project MP's age forward
+        ),
+        'geography': geo_score,
+        'race': race_match_score(mp_row.get('race'), up_row.get('race')),
+        'temporal': temporal_score(days_gap),
+    }
 
-    comps += [("TattooSignal", T), ("ClothingSignal", I),
-              ("DistinctiveMarkSignal", F), ("ForensicsSignal", M)]
+    # Weighted average
+    weighted_sum = sum(components[k] * W[k] for k in components)
+    weight_total = sum(W[k] for k in components)
 
-    num = 0.0; den = 0.0; why = []
-    for name, val in comps:
-        key = FEATURE_TO_WEIGHT_KEY[name]
-        if (key == 'race') and (not use_race):
-            continue
-        w = W[key]
-        num += w * val; den += w
-        why.append((name, w * val))
+    final_score = weighted_sum / weight_total if weight_total > 0 else 0.0
 
-    score = max(0.0, min(1.0, num / den if den > 0 else 0.0))
-    why_msgs = [f"{n} (+{c:.2f})" for n, c in
-                sorted(why, key=lambda x: x[1], reverse=True)[:5]]
-    return score, why_msgs
+    # Ensure score is between 0 and 1
+    final_score = max(0.0, min(1.0, final_score))
+
+    return final_score, components

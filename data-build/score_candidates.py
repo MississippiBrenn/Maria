@@ -38,7 +38,7 @@ up['found_days'] = pd.to_datetime(up['found_date'], errors='coerce').dt.date.map
 # Merge MP and UP data into pairs
 print("\n2. Merging case data with pairs...")
 pairs = pairs.merge(
-    mp[['id', 'sex', 'age_min', 'race', 'state', 'county', 'city', 'last_seen_days', 'first_name', 'last_name']].rename(
+    mp[['id', 'sex', 'age_min', 'race', 'state', 'county', 'city', 'last_seen_days', 'last_seen_date', 'first_name', 'last_name']].rename(
         columns={'sex': 'sex_mp', 'age_min': 'age_min_mp', 'race': 'race_mp',
                  'state': 'state_mp', 'county': 'county_mp', 'city': 'city_mp'}
     ),
@@ -194,18 +194,18 @@ up_match_counts = pairs.groupby('up_id').size()
 pairs['mp_match_count'] = pairs['mp_id'].map(mp_match_counts)
 pairs['up_match_count'] = pairs['up_id'].map(up_match_counts)
 
-# HARD FILTER: Only keep matches where BOTH sides have ≤10 candidates
+# HARD FILTER: Only keep matches where BOTH sides have ≤15 candidates
 print(f"   Before uniqueness filter: {len(pairs):,} pairs")
-pairs = pairs[(pairs['mp_match_count'] <= 10) & (pairs['up_match_count'] <= 10)]
-print(f"   After uniqueness filter: {len(pairs):,} pairs (both sides ≤10 matches)")
+pairs = pairs[(pairs['mp_match_count'] <= 15) & (pairs['up_match_count'] <= 15)]
+print(f"   After uniqueness filter: {len(pairs):,} pairs (both sides ≤15 matches)")
 
 def vec_uniqueness_boost(mp_count, up_count):
     # Much more aggressive boost for truly unique matches
     boost = np.zeros(len(mp_count))
-    # MP side: 1-2 matches = 0.25, 3-5 = 0.15, 6-10 = 0.08
-    boost += np.where(mp_count <= 2, 0.25, np.where(mp_count <= 5, 0.15, 0.08))
-    # UP side: 1-2 matches = 0.25, 3-5 = 0.15, 6-10 = 0.08
-    boost += np.where(up_count <= 2, 0.25, np.where(up_count <= 5, 0.15, 0.08))
+    # MP side: 1-2 matches = 0.25, 3-5 = 0.15, 6-10 = 0.08, 11-15 = 0.03
+    boost += np.where(mp_count <= 2, 0.25, np.where(mp_count <= 5, 0.15, np.where(mp_count <= 10, 0.08, 0.03)))
+    # UP side: 1-2 matches = 0.25, 3-5 = 0.15, 6-10 = 0.08, 11-15 = 0.03
+    boost += np.where(up_count <= 2, 0.25, np.where(up_count <= 5, 0.15, np.where(up_count <= 10, 0.08, 0.03)))
     return boost
 
 pairs['uniqueness_boost'] = vec_uniqueness_boost(pairs['mp_match_count'], pairs['up_match_count'])
@@ -235,8 +235,22 @@ def vec_rarity_boost(mp_rarity, up_rarity):
 
 pairs['rarity_boost'] = vec_rarity_boost(pairs['mp_rarity'], pairs['up_rarity'])
 
+# Era boost (1980-2006 priority)
+print("\n7. Calculating era boost (1980-2006 priority)...")
+def vec_era_boost(last_seen_date):
+    # Parse dates and extract year
+    dates = pd.to_datetime(last_seen_date, errors='coerce')
+    years = dates.dt.year
+
+    # Boost for 1980-2006 era (better data quality, active investigation period)
+    boost = np.where((years >= 1980) & (years <= 2006), 0.10, 0.0)
+
+    return boost
+
+pairs['era_boost'] = vec_era_boost(pairs['last_seen_date'])
+
 # Final score
-pairs['final_score'] = (pairs['base_score'] + pairs['uniqueness_boost'] + pairs['rarity_boost']).clip(0, 1)
+pairs['final_score'] = (pairs['base_score'] + pairs['uniqueness_boost'] + pairs['rarity_boost'] + pairs['era_boost']).clip(0, 1)
 
 # Sort by score
 pairs = pairs.sort_values('final_score', ascending=False)
@@ -253,6 +267,7 @@ for i, row in pairs.head(10).iterrows():
     print(f"    Base: {row['base_score']:.3f}")
     print(f"    Uniqueness: +{row['uniqueness_boost']:.3f} (MP: {row['mp_match_count']} matches, UP: {row['up_match_count']} matches)")
     print(f"    Rarity: +{row['rarity_boost']:.3f} (MP: {row['mp_rarity']:.2f}, UP: {row['up_rarity']:.2f})")
+    print(f"    Era: +{row['era_boost']:.3f} (Last seen: {row['last_seen_date']})")
 
 # Save results
 print(f"\n" + "="*60)
@@ -279,7 +294,7 @@ top_per_mp = {}
 for mp_id in tqdm(pairs['mp_id'].unique(), desc="Processing MPs"):
     matches = pairs[pairs['mp_id'] == mp_id].head(20)
     top_per_mp[mp_id] = matches[[
-        'up_id', 'final_score', 'base_score', 'uniqueness_boost', 'rarity_boost',
+        'up_id', 'final_score', 'base_score', 'uniqueness_boost', 'rarity_boost', 'era_boost',
         'mp_match_count', 'up_match_count', 'days_gap'
     ]].to_dict(orient='records')
 
@@ -356,7 +371,8 @@ md += f'''
 - ⭐ High (≤5 both): {len(top_100[(top_100['mp_match_count'] <= 5) & (top_100['up_match_count'] <= 5)])}
 - ✓ Total: {len(pairs)}
 
-**Filters:** Infant remains excluded | Both sides ≤10 matches | Same state | Age overlap | Temporal validity
+**Filters:** Infant remains excluded | Both sides ≤15 matches | Cross-state matching | Age overlap | Temporal validity
+**Boosts:** Uniqueness (≤5 matches) | Rarity (names/locations) | Era priority (1980-2006)
 '''
 
 md_output = os.path.join(ROOT, 'TOP_MATCHES.md')
