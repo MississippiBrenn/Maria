@@ -97,10 +97,15 @@ Maria/
 │   └── merge_raw_downloads.py     # Utility for combining exports
 │
 ├── data/
-│   ├── raw/                       # NamUs CSV downloads
+│   ├── raw/                       # NamUs CSV exports (partial files)
+│   │   ├── Missing/               # Missing persons exports
+│   │   └── Unidentified/          # Unidentified persons exports
+│   ├── compiled/                  # Merged exports
+│   │   ├── missing_persons.csv
+│   │   └── unidentified_persons.csv
 │   └── clean/                     # Processed master files
-│       ├── MP_master.csv          # Missing persons
-│       └── UP_master.csv          # Unidentified persons
+│       ├── MP_master.csv          # Missing persons (normalized)
+│       └── UP_master.csv          # Unidentified persons (normalized)
 │
 ├── out/                           # Generated outputs
 │   ├── candidate_pairs.csv        # Filtered candidate pairs
@@ -188,26 +193,34 @@ Export bulk downloads from [NamUs](https://namus.gov):
 - Missing Persons (all available columns)
 - Unidentified Persons (all available columns)
 
-Save to `data/raw/`
+NamUs limits exports to 10,000 records, so you may need multiple partial exports.
+Save them to `data/raw/Missing/` and `data/raw/Unidentified/`
 
-### 2. Process Raw Data
+### 2. Merge Partial Exports
+```bash
+python3 data-build/merge_raw_downloads.py
+```
+This creates `data/compiled/missing_persons.csv` and `data/compiled/unidentified_persons.csv`
+
+### 3. Process into Master Files
 ```bash
 python3 data-build/process_namus_downloads.py \
-    --mp data/raw/missing_persons.csv \
-    --up data/raw/unidentified_persons.csv
+    --mp data/compiled/missing_persons.csv \
+    --up data/compiled/unidentified_persons.csv
 ```
+This creates `data/clean/MP_master.csv` and `data/clean/UP_master.csv`
 
-### 3. Generate Candidate Pairs
+### 4. Generate Candidate Pairs
 ```bash
 python3 data-build/generate_candidate_pairs.py
 ```
 
-### 4. Score Matches
+### 5. Score Matches
 ```bash
 python3 data-build/score_candidates.py
 ```
 
-### 5. Review Results
+### 6. Review Results
 - Open `TOP_MATCHES.md` for the investigation guide
 - `high_priority_matches.csv` contains the best leads
 - Each match includes links to NamUs case pages
