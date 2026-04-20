@@ -5,6 +5,7 @@ All notable changes to the Maria project are documented here.
 ## [Unreleased]
 
 ### Added
+- **Race overlap filtering** in candidate pair generation - Only keeps pairs where MP and UP share at least one race category (or one is unknown/uncertain)
 - Geographic visualization module for mapping cases by location
 - Temporal analysis for identifying time-based patterns
 - Pattern identification algorithms (geographic/demographic clustering)
@@ -12,7 +13,14 @@ All notable changes to the Maria project are documented here.
 - Interview questions documentation for portfolio presentation
 - Comprehensive CHANGELOG
 
+### Fixed
+- **State normalization** - MP files used abbreviations (FL, CA) while UP files used full names (Florida, California). Now both are normalized to 2-letter codes via `state_normalizer.py`
+
 ### Changed
+- Race matching upgraded from soft scoring to hard filtering with partial overlap support
+  - Previously: Race mismatch scored 0.3 (soft penalty)
+  - Now: Race mismatch filtered out entirely, unless one side is unknown/uncertain
+  - Multi-race values (e.g., "White / Caucasian, Hispanic / Latino") match if any category overlaps
 - Renamed pipeline files for clarity:
   - `build_graph_artifacts_optimized.py` → `generate_candidate_pairs.py`
   - `build_candidates_vectorized.py` → `score_candidates.py`

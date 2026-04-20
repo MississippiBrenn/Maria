@@ -55,11 +55,21 @@ pairs = pairs.merge(
 
 print(f"   Merged data ready: {len(pairs):,} rows")
 
-# FILTER: Exclude UPs with no age (likely infant remains)
-print("\n2b. Filtering out likely infant remains...")
-before_infant_filter = len(pairs)
-pairs = pairs[pairs['age_min_up'].notna() & pairs['age_max_up'].notna()]
-print(f"   Before: {before_infant_filter:,} | After: {len(pairs):,} | Removed: {before_infant_filter - len(pairs):,} (no UP age = likely infant)")
+# FILTER: Only exclude definite infants (age 0-1), flag missing ages for review
+print("\n2b. Filtering infant remains and flagging missing ages...")
+before_filter = len(pairs)
+
+# Flag cases needing age review (missing UP age)
+pairs['needs_age_review'] = pairs['age_min_up'].isna() | pairs['age_max_up'].isna()
+needs_review_count = pairs['needs_age_review'].sum()
+
+# Only filter out definite infants (age 0 or 1)
+is_infant = (pairs['age_max_up'].notna()) & (pairs['age_max_up'] <= 1)
+pairs = pairs[~is_infant]
+
+print(f"   Before: {before_filter:,} | After: {len(pairs):,}")
+print(f"   Removed: {before_filter - len(pairs):,} (definite infants, age 0-1)")
+print(f"   Flagged for age review: {needs_review_count:,} (missing UP age)")
 
 # VECTORIZED SCORING
 print("\n3. Computing scores (vectorized)...")
@@ -280,8 +290,8 @@ print(f"✓ {full_output}")
 
 # High priority matches: both sides have ≤5 matches AND final score ≥ 0.7
 high_priority = pairs[
-    (pairs['mp_match_count'] <= 5) &
-    (pairs['up_match_count'] <= 5) &
+    (pairs['mp_match_count'] <= 10) &
+    (pairs['up_match_count'] <= 10) &
     (pairs['final_score'] >= 0.7)
 ].copy()
 high_priority_output = os.path.join(OUT_DIR, 'high_priority_matches.csv')

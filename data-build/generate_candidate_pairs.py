@@ -7,8 +7,40 @@ Uses vectorized operations and smart indexing to avoid nested loops.
 import os
 import json
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from state_normalizer import normalize_state
+
+
+def parse_races(race_str):
+    """Parse a race string into a set of normalized race categories."""
+    if pd.isna(race_str) or str(race_str).strip() == '':
+        return set()
+    # Split by comma and normalize each part
+    races = set()
+    for part in str(race_str).split(','):
+        normalized = part.strip().upper()
+        if normalized and normalized not in ('UNCERTAIN', 'UNKNOWN', 'OTHER'):
+            races.add(normalized)
+    return races
+
+
+def races_overlap(race_mp, race_up):
+    """Check if two race strings have any overlapping categories.
+
+    Returns True if:
+    - Either race is empty/unknown (can't rule out match)
+    - There's at least one common race category
+    """
+    races_mp = parse_races(race_mp)
+    races_up = parse_races(race_up)
+
+    # If either is empty/unknown, allow the match (can't rule it out)
+    if not races_mp or not races_up:
+        return True
+
+    # Check for any overlap
+    return bool(races_mp & races_up)
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(ROOT, 'data', 'clean')
@@ -90,9 +122,9 @@ for mp_sex, up_sexes in sex_matching_rules:
 
         # Cross join this MP chunk with matching UPs
         pairs_chunk = mp_chunk[['id', 'sex', 'age_min', 'age_max', 'last_seen_days',
-                                 'county', 'city', 'state', '_merge_key']].merge(
+                                 'county', 'city', 'state', 'race', '_merge_key']].merge(
             up_temp[['id', 'sex', 'age_min', 'age_max', 'found_days',
-                    'county', 'city', 'state', '_merge_key']],
+                    'county', 'city', 'state', 'race', '_merge_key']],
             on='_merge_key',
             suffixes=('_mp', '_up')
         )
@@ -123,6 +155,28 @@ for mp_sex, up_sexes in sex_matching_rules:
             (pairs_chunk['found_days'] >= pairs_chunk['last_seen_days'] - 7)
         )
         pairs_chunk = pairs_chunk[temporal_valid]
+
+        if len(pairs_chunk) == 0:
+            continue
+
+        # Filter 4: Same state (critical for reducing pairs to manageable size)
+        pairs_chunk['state_mp_norm'] = pairs_chunk['state_mp'].str.strip().str.upper()
+        pairs_chunk['state_up_norm'] = pairs_chunk['state_up'].str.strip().str.upper()
+        same_state_filter = (
+            (pairs_chunk['state_mp_norm'] == pairs_chunk['state_up_norm']) &
+            (pairs_chunk['state_mp_norm'] != '') &
+            (pairs_chunk['state_mp_norm'].notna())
+        )
+        pairs_chunk = pairs_chunk[same_state_filter]
+
+        if len(pairs_chunk) == 0:
+            continue
+
+        # Filter 5: Race overlap (at least one common race category, or unknown)
+        race_overlap_mask = pairs_chunk.apply(
+            lambda row: races_overlap(row['race_mp'], row['race_up']), axis=1
+        )
+        pairs_chunk = pairs_chunk[race_overlap_mask]
 
         if len(pairs_chunk) == 0:
             continue

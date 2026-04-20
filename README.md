@@ -47,6 +47,8 @@ This reduces actionable matches from **5.68 million** to approximately **165** h
 │  │  • Sex must match (M↔M, F↔F, Unknown↔any)                   │   │
 │  │  • Age ranges must overlap                                   │   │
 │  │  • Found date ≥ last seen date (−7 day tolerance)           │   │
+│  │  • Same state (normalized to 2-letter codes)                │   │
+│  │  • Race must overlap (at least one shared category)         │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │  Optimization: Vectorized pandas operations, sex-based chunking     │
 │  Output: candidate_pairs.csv (~3.5GB for full dataset)              │
@@ -139,7 +141,9 @@ Maria/
 
 **4. Race Match (weight: 0.8)**
 - Match: 1.0
-- Mismatch: 0.3 (soft—allows for identification errors)
+- Partial overlap: 1.0 (multi-race values with shared category)
+- Unknown/Uncertain: 0.5 (can't rule out)
+- Mismatch: Hard filtered in pair generation
 
 **5. Temporal Score (weight: 1.2)**
 - Within 30 days: 1.0
@@ -254,8 +258,8 @@ MP-12345 <-> UP-6789
 **Why state-based filtering?**
 Cross-state matching is rare in reality and would multiply candidate pairs. The system keeps results actionable by focusing on in-state matches first.
 
-**Why soft race matching?**
-Race identification from remains can be unreliable due to decomposition, ancestry complexity, and subjective classification. A hard filter would miss valid matches.
+**Why race overlap filtering?**
+Race is now a hard filter requiring at least one overlapping category between MP and UP. Multi-race values (e.g., "White / Caucasian, Hispanic / Latino") match if any category overlaps. Unknown/Uncertain race values pass through since they can't rule out a match. This eliminates clear mismatches while handling mixed-race and uncertain cases appropriately.
 
 **Why the era boost?**
 Cases from 1980–2006 tend to have better documentation and are within the window where matches are most actionable for families.

@@ -12,6 +12,7 @@ import os
 import argparse
 import pandas as pd
 from dateutil import parser as date_parser
+from state_normalizer import normalize_state
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 CLEAN_DIR = os.path.join(ROOT, "data", "clean")
@@ -63,7 +64,7 @@ def process_missing_persons(mp_file):
         "last_seen_date": df.get("DLC", "").apply(parse_date),
         "city": df.get("City", "").fillna(""),
         "county": df.get("County", "").fillna(""),
-        "state": df.get("State", "").fillna(""),
+        "state": df.get("State", "").fillna("").apply(normalize_state),
         "date_modified": df.get("Date Modified", "").apply(parse_date),
     })
 
@@ -93,7 +94,7 @@ def process_unidentified_persons(up_file):
         "found_date": df.get("DBF", "").apply(parse_date),
         "city": df.get("City", "").fillna(""),
         "county": df.get("County", "").fillna(""),
-        "state": df.get("State", "").fillna(""),
+        "state": df.get("State", "").fillna("").apply(normalize_state),
         "date_modified": df.get("Date Modified", "").apply(parse_date),
     })
 
