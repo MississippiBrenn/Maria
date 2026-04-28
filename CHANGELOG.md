@@ -38,6 +38,54 @@ All notable changes to the Maria project are documented here.
 
 ---
 
+## [0.4.0] - 2026-04-28
+
+### Added
+- **Improved pair generation v2** (`generate_candidate_pairs_v2.py`)
+  - Applies exclusions at generation time (infants, partial remains, historical cases)
+  - Priority tier system to deprioritize same-city matches (likely already investigated)
+  - Cross-state matching for adjacent states (people cross state lines)
+- **Adjacent states mapping** (`adjacent_states.py`) - Geographic adjacency for all US states
+- **Match prioritization** (`prioritize_matches.py`) - Composite scoring combining:
+  - Priority tier (geography-based)
+  - Match specificity (fewer matches = more valuable)
+  - Rarity score (rare demographics matching)
+  - Temporal proximity
+- **Interactive review helper** (`review_matches.py`) - Streamlined manual review workflow with:
+  - Case comparison display
+  - One-key exclusion workflow
+  - Review progress tracking
+- **Exclusions system** (`data/exclusions.csv`) - Centralized tracking of cases to exclude:
+  - INFANT - Fetus/infant remains
+  - PARTIAL_REMAINS - Skull only, torso only, etc.
+  - HISTORICAL - Pre-dates modern MP database (e.g., 1930s)
+- **Rebuild script** (`rebuild.sh`) - One-command pipeline rebuild
+
+### Changed
+- **Priority tiers replace flat matching**:
+  - Tier 1 (HIGH): Different county within same state - likely NOT already checked
+  - Tier 2: Adjacent state matches - cross-state cases
+  - Tier 3: Same county, different city
+  - Tier 4 (LOW): Same city - authorities likely already checked
+- **Output files reorganized**:
+  - `candidate_pairs.csv` - All pairs
+  - `candidate_pairs_high_priority.csv` - Tier 1-2 only
+  - `candidate_pairs_tier1.csv` - Tier 1 only (best for manual review)
+  - `candidate_pairs_prioritized.csv` - Scored and sorted
+  - `best_match_per_up.csv` - UPs with 1-10 matches, best match each
+  - `top_matches_for_review.csv` - Top 1000 pairs overall
+
+### Insights from Manual Review
+- Same-city matches are almost always already checked by authorities
+- Height differences of 3+ inches typically rule out matches
+- Weight differences of 20+ lbs can rule out matches (for non-decomposed remains)
+- UPs with few potential matches are most valuable to investigate
+- Cross-state matching catches cases where people crossed state lines
+- 713 UPs identified with 1-10 high-priority matches (focused review list)
+- 105 UPs identified with exactly 1 potential match (highest confidence)
+
+---
+
 ## [0.3.0] - 2024-12
 
 ### Added
